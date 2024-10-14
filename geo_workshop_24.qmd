@@ -1,0 +1,198 @@
+---
+title: "Geospatial Workshop PPSP 2024"
+author: "Afiq Amsyar"
+format:
+  html:
+    toc: true
+    toc-location: left
+    theme: 
+      light: cosmo
+      dark: 
+        - cosmo
+        - theme-dark.scss
+    grid:
+      sidebar-width: 300px
+      margin-width: 300px
+      body-width: 900px
+  pdf:
+    toc: true
+    number-sections: true
+    colorlinks: true
+  docx: 
+    toc: true
+    toc-depth: 2
+self-contained: true
+---
+
+## Spatial Packages in R
+
+Ensure the following R packages are installed beforehand.
+
+```{r, eval = FALSE}
+install.packages(c("sf", "terra", "geodata", "rnaturalearth", "spdep",
+
+                   "dplyr", "SpatialEpi", "wbstats", "flexdashboard",
+
+                   "ggplot2", "viridis", "RColorBrewer", "patchwork", "DT",
+
+                   "leaflet", "mapview", "leafpop", "leafsync", "rasterVis"))
+```
+
+```{r, eval = FALSE}
+install.packages("INLA",
+repos = "https://inla.r-inla-download.org/R/stable", dep = TRUE)
+```
+
+## Load Packages
+
+For this session, we will load some of the packages needed for plotting basic spatial data
+
+```{r}
+library(sf)
+library(mapview)
+library(janitor)
+library(readxl)
+library(dplyr)
+library(ggplot2)
+library(DT)
+```
+
+## Making Maps with R
+
+```{r}
+kelantan <- st_read("kelantan.shp")
+```
+
+### Plot 1
+
+```{r}
+mapview(kelantan[,3])
+```
+
+### Plot 2
+
+```{r}
+# Create a custom popup with multiple fields
+popup_info <- paste0(
+  "<strong>MUKIM: </strong>", kelantan$MUKIM, "<br>",
+  "<strong>DAERAH: </strong>", kelantan$DAERAH, "<br>",
+  "<strong>Population: </strong>", kelantan$JUM_JANTIN
+)
+mapView(kelantan, zcol = "JUM_JANTIN", layer.name = "Population", popup = popup_info)
+```
+
+## Adding Spatial Attributes
+
+### Leptospirosis Data
+
+```{r}
+lepto <- read_xlsx("leptospirosis.xlsx") %>% clean_names()
+glimpse(lepto)
+```
+
+### **Convert Leptospirosis data to spatial data**
+
+Use st_as_sf ( ) function to convert line listing data that contained Lat/Long attributes to spatial object
+
+```{r}
+lepto <- st_as_sf(lepto, 
+                    coords = c("longitude_wgs", "latitude_wgs"), 
+                    crs = 4326)
+```
+
+Confirm CRS is wgs84
+
+```{r}
+st_crs(lepto)
+```
+
+### **Convert shapefile to RSO to match with Kelantan Map**
+
+```{r}
+lepto_2 <- st_transform(lepto, 3168)
+```
+
+### **Plot map to see outlier**
+
+```{r}
+ggplot() +
+  geom_sf(data = lepto_2) +
+  ggtitle("Map of Leptospirosis") +
+  theme_bw()
+```
+
+### Plot the cases over the Kelantan map
+
+```{r}
+overall_plot <- ggplot() +
+  geom_sf(data = kelantan) +   #base map
+  geom_sf(data = lepto_2, color = "red", size = 0.5) +  #cases in spatial data
+  ggtitle("Map of Leptospirosis Cases in Kelantan for 2016-2022") +
+  theme_bw() +  
+  theme(plot.title = element_text(size = 12),  strip.text = element_text(size = 12)) # cosmetic
+
+overall_plot 
+```
+
+```{r}
+overall_plot + 
+  facet_wrap(~tahun_daftar) + #to plot according to year
+  theme(axis.text.x = element_text(angle = 0, hjust = 0.5, vjust = 0.5)) +
+  theme(plot.title = element_text(size = 12),  strip.text = element_text(size = 12)) +
+  ggtitle("Map of Leptospirosis Cases in Kelantan for 2016-2022")
+```
+
+### **Using OSM as basemap**
+
+```{r}
+library(leaflet)
+
+leaflet(lepto) |>
+  addTiles() |>  # Add default OpenStreetMap tiles
+  addCircleMarkers(
+    radius = 2,   # Adjust marker size
+    color = "red",  # Marker color
+    stroke = FALSE, fillOpacity = 0.8)
+```
+
+## **Aggregated Data**
+
+For this exercise, we focus our analysis on Leptospirosis cases reported in 2016 only.
+
+```{r}
+lepto_16 <- lepto_2 %>% filter(tahun_daftar == "2016")
+```
+
+### **Joint point to polygon**
+
+```{r}
+st_crs(lepto_16)
+```
+
+### **Count all leptospirosis cases for each mukim in 2016**
+
+```{r}
+count_lepto_sub_yr <- lepto_16 %>% 
+  count(daerah, mukim) %>% 
+  ungroup()
+```
+
+### **Joining the count data to base-map of Kelantan**
+
+```{r}
+kelantan_count_lepto <- st_join(kelantan, count_lepto_sub_yr)
+```
+
+### Map the count of cases according to subdistrict in Kelantan
+
+```{r}
+# Create a custom popup with multiple fields
+popup_info <- paste0(
+  "<strong>MUKIM: </strong>", kelantan_count_lepto$MUKIM, "<br>",
+  "<strong>DAERAH: </strong>", kelantan_count_lepto$DAERAH, "<br>",
+  "<strong>Leptospirosis Cases: </strong>", kelantan_count_lepto$n
+)
+
+# Display the map with the custom popup
+mapView(kelantan_count_lepto, zcol = "n", layer.name = "Count of Leptospirosis cases 2016", popup = popup_info)
+```
